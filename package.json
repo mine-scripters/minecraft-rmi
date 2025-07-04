@@ -1,0 +1,52 @@
+{
+  "name": "@mine-scripters/minecraft-rmi",
+  "version": "0.0.1",
+  "description": "Minecraft Remote method invocation",
+  "main": "./dist/MinecraftRMI.js",
+  "types": "./dist/MinecraftRMI.d.ts",
+  "private": false,
+  "devDependencies": {
+    "@minecraft/server": "^2.0.0",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@rollup/plugin-typescript": "^12.1.2",
+    "@typescript-eslint/eslint-plugin": "^8.26.1",
+    "@typescript-eslint/parser": "^8.26.1",
+    "dts-bundle-generator": "^9.5.1",
+    "eslint": "^9.22.0",
+    "eslint-config-prettier": "^10.1.1",
+    "eslint-plugin-jest": "^28.11.0",
+    "prettier": "^3.5.3",
+    "rollup": "^4.35.0",
+    "typedoc": "^0.28.0",
+    "typescript": "^5.8.3"
+  },
+  "scripts": {
+    "build": "rollup -c && dts-bundle-generator -o dist/MinecraftRMI.d.ts src/index.ts",
+    "docs": "typedoc",
+    "test": "jest",
+    "prettier": "npm run prettier:base -- --write",
+    "prettier:check": "npm run prettier:base -- --check",
+    "prettier:base": "prettier src/** *.json ./*js README.md",
+    "lint": "eslint src",
+    "lint:fix": "eslint --fix src"
+  },
+  "peerDependencies": {
+    "@minecraft/server": "^2.0.0"
+  },
+  "files": [
+    "package.json",
+    "dist/**",
+    "README.md",
+    "LICENSE.txt"
+  ],
+  "keywords": [
+    "minecraft",
+    "minecraft-scripting",
+    "rmi"
+  ],
+  "author": "Josejulio Martínez",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  }
+}
