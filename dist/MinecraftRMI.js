@@ -1,4 +1,4 @@
-import { world, system, DimensionTypes } from '@minecraft/server';
+import { DimensionTypes, world, system } from '@minecraft/server';
 
 const MINESCRIPTERS_NAMESPACE = 'minescripters';
 const buildServerNamespace = (namespace) => `${MINESCRIPTERS_NAMESPACE}_${namespace}`;
@@ -7,14 +7,6 @@ const sendEvent = (event) => {
     DimensionTypes.getAll().some((dt) => {
         return world.getDimension(dt.typeId)?.runCommand(`scriptevent ${event}`).successCount;
     });
-};
-const argsKey = (namespace, message) => `${buildServerNamespace(namespace)}:rmi.payload.${message.endpoint}.${message.id}.args`;
-const returnValueKey = (namespace, message) => `${buildServerNamespace(namespace)}:rmi.payload.${message.endpoint}.${message.id}.return`;
-const setDynamicPropertyAndExpire = (key, value, timeout) => {
-    world.setDynamicProperty(key, JSON.stringify(value));
-    system.runTimeout(() => {
-        world.setDynamicProperty(key);
-    }, timeout);
 };
 
 var SchemaEntryType;
@@ -150,6 +142,105 @@ const normalize = (schema) => {
     return schema;
 };
 
+const makeId = () => {
+    return Math.random().toString(36).substring(2);
+};
+
+const RMI_NAMESPACE = 'minescripters_rmi';
+// Prevents the scriptevent parser from identifying it as a json object an failing to parse
+const CHUNK_PADDING = '-';
+const receiverScriptEvent = (id) => `${RMI_NAMESPACE}:${id}.receiver`;
+const senderScriptEvent = (id) => `${RMI_NAMESPACE}:${id}.sender`;
+const promiseResolver = () => {
+    let resolver = () => { };
+    return [
+        new Promise((resolve) => {
+            resolver = resolve;
+        }),
+        resolver,
+    ];
+};
+const ackWaiter = async (scriptEvent) => {
+    const [acked, ack] = promiseResolver();
+    const namespace = scriptEvent.split(':')[0];
+    const listener = system.afterEvents.scriptEventReceive.subscribe((event) => {
+        if (event.id === scriptEvent) {
+            ack();
+        }
+    }, {
+        namespaces: [namespace],
+    });
+    await acked;
+    system.afterEvents.scriptEventReceive.unsubscribe(listener);
+};
+const internalSendMessage = async (header, data, scriptevent, maxMessageSize = 2048) => {
+    const id = makeId();
+    const chunks = [];
+    if (data !== undefined) {
+        const dataString = JSON.stringify(data);
+        for (let i = 0; i < maxMessageSize; i += maxMessageSize) {
+            chunks.push(dataString.slice(i, i + maxMessageSize));
+        }
+    }
+    const transportHeader = {
+        id,
+        header,
+    };
+    if (chunks.length > 0) {
+        transportHeader.chunkCount = chunks.length;
+    }
+    const initialAck = ackWaiter(senderScriptEvent(id));
+    const rawTransportHeader = JSON.stringify(transportHeader);
+    if (rawTransportHeader.length > 2048) {
+        console.error('Transport header is bigger than 2048 characters:', rawTransportHeader);
+        throw new Error('Transport header is bigger than 2048');
+    }
+    sendEvent(`${scriptevent} ${rawTransportHeader}`);
+    await initialAck;
+    if (chunks.length > 0) {
+        const chunksAck = ackWaiter(senderScriptEvent(id));
+        for (const chunk of chunks) {
+            sendEvent(`${receiverScriptEvent(id)} ${CHUNK_PADDING}${chunk}`);
+        }
+        await chunksAck;
+    }
+};
+const internalMessageReceived = async (rawHeader) => {
+    const header = JSON.parse(rawHeader);
+    const id = header.id;
+    if (!id) {
+        console.error('Unknown data received:', header);
+        throw new Error('Unknow data received');
+    }
+    const chunkCount = header.chunkCount;
+    const chunks = [];
+    let data = undefined;
+    if (chunkCount && chunkCount > 0) {
+        const [acked, ack] = promiseResolver();
+        const listener = system.afterEvents.scriptEventReceive.subscribe((event) => {
+            if (event.id === receiverScriptEvent(id)) {
+                // Removes CHUNK_PADDING
+                chunks.push(event.message.slice(1));
+                if (chunks.length === chunkCount) {
+                    ack();
+                }
+            }
+        }, {
+            namespaces: [RMI_NAMESPACE],
+        });
+        sendEvent(`${senderScriptEvent(id)}`);
+        await acked;
+        system.afterEvents.scriptEventReceive.unsubscribe(listener);
+        const rawData = chunks.join('');
+        data = JSON.parse(rawData);
+        sendEvent(`${senderScriptEvent(id)}`);
+    }
+    return {
+        header: header.header,
+        data,
+    };
+};
+
 const serverStopEvent = (server) => `${buildServerNamespace(server.namespace)}:rmi.event-stop`;
 const serverReturnEvent = (namespace, message) => {
     const localNamespace = `${buildServerNamespace(namespace)}_${message.id}`;
@@ -159,31 +250,19 @@ const returnError = (server, payload, error) => {
     const message = {
         id: payload.id,
         endpoint: payload.endpoint,
-        hasValue: false,
+        hasReturn: false,
         isError: true,
     };
-    const key = returnValueKey(server.namespace, message);
-    setDynamicPropertyAndExpire(key, error, payload.timeout);
-    sendEvent(`${serverReturnEvent(server.namespace, message)} ${JSON.stringify(message)}`);
+    internalSendMessage(message, error, serverReturnEvent(server.namespace, message));
 };
 const returnValue = (server, payload, value) => {
     const message = {
         id: payload.id,
         endpoint: payload.endpoint,
-        hasValue: value !== undefined,
+        hasReturn: value !== undefined,
         isError: false,
     };
-    if (value !== undefined) {
-        const key = returnValueKey(server.namespace, message);
-        setDynamicPropertyAndExpire(key, value, payload.timeout);
-    }
-    sendEvent(`${serverReturnEvent(server.namespace, message)} ${JSON.stringify(message)}`);
-};
-const getParams = (namespace, payload) => {
-    if (payload.hasArguments) {
-        return JSON.parse(world.getDynamicProperty(argsKey(namespace, payload)));
-    }
-    return [];
+    internalSendMessage(message, value, serverReturnEvent(server.namespace, message));
 };
 const start = (server) => {
     const stopEvent = serverStopEvent(server);
@@ -193,13 +272,13 @@ const start = (server) => {
             system.afterEvents.scriptEventReceive.unsubscribe(handler);
         }
         else if (event.id === payloadEvent) {
-            const payload = JSON.parse(event.message);
-            // validate payload
+            const messageReceived = await internalMessageReceived(event.message);
+            const payload = messageReceived.header;
             if (!(payload.endpoint in server.endpoints)) {
                 returnError(server, payload, `Endpoint ${payload.endpoint} not found`);
                 return;
             }
-            const params = getParams(server.namespace, payload);
+            const params = (messageReceived.data === undefined ? [] : messageReceived.data);
             const endpoint = server.endpoints[payload.endpoint];
             if (endpoint.schema?.arguments) {
                 try {
@@ -235,29 +314,23 @@ const startServer = (_server) => {
     start(server);
 };
 
-const makeId = () => {
-    return Math.random().toString(36).substring(2);
-};
-
 const responseListener = (input) => {
     let handler;
     const promise = new Promise((resolve, reject) => {
         const cancelHandler = system.runTimeout(() => {
             reject(new Error(`Timeout: Timed out trying to run ${input.endpoint} of ${input.namespace}`));
         }, input.timeout);
-        handler = system.afterEvents.scriptEventReceive.subscribe((event) => {
+        handler = system.afterEvents.scriptEventReceive.subscribe(async (event) => {
             if (event.id === input.eventKey) {
                 try {
-                    const returnMessage = JSON.parse(event.message);
+                    const response = await internalMessageReceived(event.message);
+                    const returnMessage = response.header;
                     if (returnMessage.isError) {
-                        const errorString = world.getDynamicProperty(returnValueKey(input.namespace, returnMessage));
-                        reject(new Error(errorString));
+                        reject(new Error(response.data));
                     }
                     else {
-                        if (returnMessage.hasValue) {
-                            const returnValue = world.getDynamicProperty(returnValueKey(input.namespace, returnMessage));
-                            world.setDynamicProperty(returnValueKey(input.namespace, returnMessage));
-                            resolve(JSON.parse(returnValue));
+                        if (returnMessage.hasReturn) {
+                            resolve(response.data);
                         }
                         else {
                             resolve(undefined);
@@ -287,7 +360,6 @@ const sendMessage = async (namespace, endpoint, args, timeout = 60) => {
     const message = {
         id: messageId,
         endpoint: endpoint,
-        hasArguments: args !== undefined && args.length > 0,
         timeout,
     };
     const [clean, promise] = responseListener({
@@ -298,11 +370,7 @@ const sendMessage = async (namespace, endpoint, args, timeout = 60) => {
         timeout,
     });
     try {
-        if (message.hasArguments) {
-            const argumentsKey = argsKey(namespace, message);
-            setDynamicPropertyAndExpire(argumentsKey, args, timeout);
-        }
-        sendEvent(`${inputMessageEvent(namespace)} ${JSON.stringify(message)}`);
+        internalSendMessage(message, args, inputMessageEvent(namespace));
         return await promise;
     }
     finally {
