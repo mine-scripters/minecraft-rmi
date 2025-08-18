@@ -1,6 +1,6 @@
 {
   "name": "@mine-scripters/minecraft-rmi",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Minecraft Remote method invocation",
   "main": "./dist/MinecraftRMI.js",
   "types": "./dist/MinecraftRMI.d.ts",
