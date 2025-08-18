@@ -22,7 +22,7 @@ describe('MinecraftRMI', () => {
     const promise = sendMessage('my_addon', 'stuff', undefined, 60);
 
     expect(runCommand).toHaveBeenCalledWith(
-      'scriptevent minescripters_my_addon:rmi.event-payload {"id":"4fzzzxjylrx","endpoint":"stuff","hasArguments":false,"timeout":60}'
+      'scriptevent minescripters_my_addon:rmi.event-payload {"id":"4fzzzxjylrx","header":{"id":"4fzzzxjylrx","endpoint":"stuff","timeout":60}}'
     );
     expect(runCommand).toHaveBeenCalledTimes(1);
 
@@ -46,14 +46,12 @@ describe('MinecraftRMI', () => {
       endpoints: {},
     });
 
-    const promise = sendMessage('my_addon', 'stuff', undefined, 60);
+    await expect(sendMessage('my_addon', 'stuff', undefined, 60)).rejects.toThrow('Endpoint stuff not found');
 
     expect(runCommand).toHaveBeenCalledWith(
-      'scriptevent minescripters_my_addon:rmi.event-payload {"id":"4fzzzxjylrx","endpoint":"stuff","hasArguments":false,"timeout":60}'
+      'scriptevent minescripters_my_addon:rmi.event-payload {"id":"4fzzzxjylrx","header":{"id":"4fzzzxjylrx","endpoint":"stuff","timeout":60}}'
     );
-    expect(runCommand).toHaveBeenCalledTimes(2);
-
-    await expect(promise).rejects.toThrow('Endpoint stuff not found');
+    expect(runCommand).toHaveBeenCalledTimes(5);
   });
 
   it('collaboration - call endpoint', async () => {
@@ -92,7 +90,7 @@ describe('MinecraftRMI', () => {
     });
 
     await expect(async () => sendMessage('my_addon', 'stuff', ['foo', 3], 60)).rejects.toThrow(
-      'Error: Invalid schema, not a number (or bigint)"'
+      'Failed schema validation for arguments: Error: Invalid schema, not a number (or bigint)'
     );
   });
 

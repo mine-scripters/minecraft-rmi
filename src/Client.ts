@@ -1,15 +1,7 @@
-import { system, world } from '@minecraft/server';
-import {
-  buildServerNamespace,
-  sendEvent,
-  argsKey,
-  InputMessage,
-  OutputMessage,
-  returnValueKey,
-  inputMessageEvent,
-  setDynamicPropertyAndExpire,
-} from './Communication';
+import { system } from '@minecraft/server';
+import { buildServerNamespace, InputMessage, OutputMessage, inputMessageEvent } from './Communication';
 import { makeId } from './Utils';
+import { internalMessageReceived, internalSendMessage } from './Transport';
 
 interface ResponseListenerInput {
   timeout: number;
@@ -27,18 +19,16 @@ const responseListener = (input: ResponseListenerInput): [() => void, Promise<un
     }, input.timeout);
 
     handler = system.afterEvents.scriptEventReceive.subscribe(
-      (event) => {
+      async (event) => {
         if (event.id === input.eventKey) {
           try {
-            const returnMessage: OutputMessage = JSON.parse(event.message);
+            const response = await internalMessageReceived(event.message);
+            const returnMessage: OutputMessage = response.header as OutputMessage;
             if (returnMessage.isError) {
-              const errorString = world.getDynamicProperty(returnValueKey(input.namespace, returnMessage)) as string;
-              reject(new Error(errorString));
+              reject(new Error(response.data as string));
             } else {
-              if (returnMessage.hasValue) {
-                const returnValue = world.getDynamicProperty(returnValueKey(input.namespace, returnMessage)) as string;
-                world.setDynamicProperty(returnValueKey(input.namespace, returnMessage));
-                resolve(JSON.parse(returnValue));
+              if (returnMessage.hasReturn) {
+                resolve(response.data);
               } else {
                 resolve(undefined);
               }
@@ -76,7 +66,6 @@ export const sendMessage = async (
   const message: InputMessage = {
     id: messageId,
     endpoint: endpoint,
-    hasArguments: args !== undefined && args.length > 0,
     timeout,
   };
 
@@ -89,12 +78,8 @@ export const sendMessage = async (
   });
 
   try {
-    if (message.hasArguments) {
-      const argumentsKey = argsKey(namespace, message);
-      setDynamicPropertyAndExpire(argumentsKey, args, timeout);
-    }
+    internalSendMessage(message, args, inputMessageEvent(namespace));
 
-    sendEvent(`${inputMessageEvent(namespace)} ${JSON.stringify(message)}`);
     return await promise;
   } finally {
     clean();

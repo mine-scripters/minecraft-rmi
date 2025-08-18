@@ -64,12 +64,12 @@ export const dimension = {
     }
 
     command = command.substring('scriptevent '.length);
-    const pieces = command.split(' ', 2);
+    const [id, ...pieces] = command.split(' ');
 
     for (const handler of Object.values(scriptEventReceive)) {
       (handler as any)({
-        id: pieces[0],
-        message: pieces[1],
+        id: id,
+        message: pieces.join(' '),
       });
     }
 

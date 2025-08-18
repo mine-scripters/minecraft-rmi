@@ -1,15 +1,7 @@
-import { system, world } from '@minecraft/server';
-import {
-  buildServerNamespace,
-  sendEvent,
-  argsKey,
-  InputMessage,
-  OutputMessage,
-  returnValueKey,
-  inputMessageEvent,
-  setDynamicPropertyAndExpire,
-} from './Communication';
+import { system } from '@minecraft/server';
+import { buildServerNamespace, sendEvent, InputMessage, OutputMessage, inputMessageEvent } from './Communication';
 import { SchemaEntry, validate, validateArray } from './Schema';
+import { internalMessageReceived, internalSendMessage } from './Transport';
 
 export interface Server {
   namespace: string;
@@ -37,38 +29,22 @@ const returnError = (server: Server, payload: InputMessage, error: string) => {
   const message: OutputMessage = {
     id: payload.id,
     endpoint: payload.endpoint,
-    hasValue: false,
+    hasReturn: false,
     isError: true,
   };
 
-  const key = returnValueKey(server.namespace, message);
-  setDynamicPropertyAndExpire(key, error, payload.timeout);
-
-  sendEvent(`${serverReturnEvent(server.namespace, message)} ${JSON.stringify(message)}`);
+  internalSendMessage(message, error, serverReturnEvent(server.namespace, message));
 };
 
 const returnValue = (server: Server, payload: InputMessage, value: unknown) => {
   const message: OutputMessage = {
     id: payload.id,
     endpoint: payload.endpoint,
-    hasValue: value !== undefined,
+    hasReturn: value !== undefined,
     isError: false,
   };
 
-  if (value !== undefined) {
-    const key = returnValueKey(server.namespace, message);
-    setDynamicPropertyAndExpire(key, value, payload.timeout);
-  }
-
-  sendEvent(`${serverReturnEvent(server.namespace, message)} ${JSON.stringify(message)}`);
-};
-
-const getParams = (namespace: string, payload: InputMessage): Array<unknown> => {
-  if (payload.hasArguments) {
-    return JSON.parse(world.getDynamicProperty(argsKey(namespace, payload)) as string) as unknown as Array<unknown>;
-  }
-
-  return [];
+  internalSendMessage(message, value, serverReturnEvent(server.namespace, message));
 };
 
 const start = (server: Server) => {
@@ -79,15 +55,15 @@ const start = (server: Server) => {
       if (event.id === stopEvent) {
         system.afterEvents.scriptEventReceive.unsubscribe(handler);
       } else if (event.id === payloadEvent) {
-        const payload = JSON.parse(event.message) as InputMessage;
-        // validate payload
+        const messageReceived = await internalMessageReceived(event.message);
+        const payload = messageReceived.header as InputMessage;
 
         if (!(payload.endpoint in server.endpoints)) {
           returnError(server, payload, `Endpoint ${payload.endpoint} not found`);
           return;
         }
 
-        const params = getParams(server.namespace, payload);
+        const params = (messageReceived.data === undefined ? [] : messageReceived.data) as Array<unknown>;
 
         const endpoint = server.endpoints[payload.endpoint];
         if (endpoint.schema?.arguments) {
