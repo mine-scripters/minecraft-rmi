@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.2](https://github.com/mine-scripters/minecraft-rmi/compare/v1.0.1...v1.0.2) (2026-01-08)
+
+
+### Bug Fixes
+
+* use script event api and fix issues with chunking ([140eef2](https://github.com/mine-scripters/minecraft-rmi/commit/140eef265053d21c7f7a02347cc7dbf2103d29fa))
+* use script event api and fix issues with chunking ([28ad619](https://github.com/mine-scripters/minecraft-rmi/commit/28ad61942a50587b8b407395f71a272eae863ebd))
+
 ## [1.0.1](https://github.com/mine-scripters/minecraft-rmi/compare/v1.0.0...v1.0.1) (2025-08-18)
 
 
