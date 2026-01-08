@@ -1,10 +1,10 @@
-import { world, system } from '@minecraft/server';
+import { system } from '@minecraft/server';
 import { sendMessage } from './Client';
 import { startServer } from './Server';
 import { SchemaEntryType } from './Schema';
 
 describe('MinecraftRMI', () => {
-  const runCommand = world.getDimension('').runCommand;
+  const sendScriptEvent = system.sendScriptEvent;
 
   beforeEach(() => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
@@ -21,10 +21,11 @@ describe('MinecraftRMI', () => {
 
     const promise = sendMessage('my_addon', 'stuff', undefined, 60);
 
-    expect(runCommand).toHaveBeenCalledWith(
-      'scriptevent minescripters_my_addon:rmi.event-payload {"id":"4fzzzxjylrx","header":{"id":"4fzzzxjylrx","endpoint":"stuff","timeout":60}}'
+    expect(sendScriptEvent).toHaveBeenCalledWith(
+      'minescripters_my_addon:rmi.event-payload',
+      '{"id":"4fzzzxjylrx","header":{"id":"4fzzzxjylrx","endpoint":"stuff","timeout":60}}'
     );
-    expect(runCommand).toHaveBeenCalledTimes(1);
+    expect(sendScriptEvent).toHaveBeenCalledTimes(1);
 
     jest.runAllTimers();
     await expect(promise).rejects.toThrow('Timeout: Timed out trying to run stuff of my_addon');
@@ -48,10 +49,11 @@ describe('MinecraftRMI', () => {
 
     await expect(sendMessage('my_addon', 'stuff', undefined, 60)).rejects.toThrow('Endpoint stuff not found');
 
-    expect(runCommand).toHaveBeenCalledWith(
-      'scriptevent minescripters_my_addon:rmi.event-payload {"id":"4fzzzxjylrx","header":{"id":"4fzzzxjylrx","endpoint":"stuff","timeout":60}}'
+    expect(sendScriptEvent).toHaveBeenCalledWith(
+      'minescripters_my_addon:rmi.event-payload',
+      '{"id":"4fzzzxjylrx","header":{"id":"4fzzzxjylrx","endpoint":"stuff","timeout":60}}'
     );
-    expect(runCommand).toHaveBeenCalledTimes(5);
+    expect(sendScriptEvent).toHaveBeenCalledTimes(5);
   });
 
   it('collaboration - call endpoint', async () => {
@@ -110,6 +112,26 @@ describe('MinecraftRMI', () => {
 
     const promise = sendMessage('my_addon', 'stuff', [1, 2], 60);
     await expect(promise).resolves.toEqual(3);
+  });
+
+  it('collaboration - call endpoint with long input', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(global.Math, 'random').mockReturnValue(0.123456789);
+    startServer({
+      namespace: 'my_addon',
+      endpoints: {
+        stuff: {
+          handler: (arg1: string) => {
+            return arg1;
+          },
+        },
+      },
+    });
+
+    const longString = 'lorep ipsum'.repeat(2000);
+
+    const promise = sendMessage('my_addon', 'stuff', [longString], 60);
+    await expect(promise).resolves.toEqual(longString);
   });
 
   it('collaboration - call endpoint with params no return', async () => {

@@ -14,8 +14,6 @@ export interface Received {
 }
 
 const RMI_NAMESPACE = 'minescripters_rmi';
-// Prevents the scriptevent parser from identifying it as a json object an failing to parse
-const CHUNK_PADDING = '-';
 
 const receiverScriptEvent = (id: string) => `${RMI_NAMESPACE}:${id}.receiver`;
 const senderScriptEvent = (id: string) => `${RMI_NAMESPACE}:${id}.sender`;
@@ -62,7 +60,7 @@ export const internalSendMessage = async (
 
   if (data !== undefined) {
     const dataString = JSON.stringify(data);
-    for (let i = 0; i < maxMessageSize; i += maxMessageSize) {
+    for (let i = 0; i < dataString.length; i += maxMessageSize) {
       chunks.push(dataString.slice(i, i + maxMessageSize));
     }
   }
@@ -83,14 +81,14 @@ export const internalSendMessage = async (
     throw new Error('Transport header is bigger than 2048');
   }
 
-  sendEvent(`${scriptevent} ${rawTransportHeader}`);
+  sendEvent(scriptevent, rawTransportHeader);
 
   await initialAck;
   if (chunks.length > 0) {
     const chunksAck = ackWaiter(senderScriptEvent(id));
 
     for (const chunk of chunks) {
-      sendEvent(`${receiverScriptEvent(id)} ${CHUNK_PADDING}${chunk}`);
+      sendEvent(receiverScriptEvent(id), chunk);
     }
 
     await chunksAck;
@@ -116,8 +114,7 @@ export const internalMessageReceived = async (rawHeader: string): Promise<Receiv
     const listener = system.afterEvents.scriptEventReceive.subscribe(
       (event) => {
         if (event.id === receiverScriptEvent(id)) {
-          // Removes CHUNK_PADDING
-          chunks.push(event.message.slice(1));
+          chunks.push(event.message);
 
           if (chunks.length === chunkCount) {
             ack();
@@ -129,15 +126,14 @@ export const internalMessageReceived = async (rawHeader: string): Promise<Receiv
       }
     );
 
-    sendEvent(`${senderScriptEvent(id)}`);
+    sendEvent(`${senderScriptEvent(id)}`, '');
 
     await acked;
     system.afterEvents.scriptEventReceive.unsubscribe(listener);
 
     const rawData = chunks.join('');
-
     data = JSON.parse(rawData);
-    sendEvent(`${senderScriptEvent(id)}`);
+    sendEvent(`${senderScriptEvent(id)}`, '');
   }
 
   return {
