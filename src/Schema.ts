@@ -74,18 +74,19 @@ export const validate = (schema: SchemaEntry, obj: unknown) => {
 
   if (Array.isArray(schema)) {
     let passed = false;
+    const errors = [];
     for (const subSchema of schema) {
       try {
         validate(subSchema, obj);
         passed = true;
         break;
       } catch (e) {
-        console.error(e);
+        errors.push(e);
       }
     }
 
     if (!passed) {
-      throw new Error('Invalid schema');
+      throw new AggregateError(errors, 'Invalid schema, none of the schemas matched');
     }
     return;
   }

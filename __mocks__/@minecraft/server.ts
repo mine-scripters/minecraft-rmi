@@ -6,8 +6,6 @@ export const makeId = (): string => {
 };
 
 let scriptEventReceive: Record<string, unknown> = {};
-let worldProps: Record<string, unknown> = {};
-let systemTimeout: Record<string, unknown> = {};
 
 const scriptEventReceiveSubscribe = (handler: unknown) => {
   const id = makeId();
@@ -19,19 +17,9 @@ const scriptEventReceiveUnsubscribe = (handlerId: string) => {
   delete scriptEventReceive[handlerId];
 };
 
-const setDynamicProperty = (key: string, value?: unknown) => {
-  worldProps[key] = value;
-};
-
-const getDynamicProperty = (key: string) => {
-  return worldProps[key];
-};
-
 export const system = {
   reset: () => {
     scriptEventReceive = {};
-    worldProps = {};
-    systemTimeout = {};
   },
 
   runTimeout: (handler: () => void, timeout: number) => {
@@ -47,42 +35,16 @@ export const system = {
       unsubscribe: jest.fn(scriptEventReceiveUnsubscribe as any),
     },
   },
-};
-
-export const DimensionTypes = {
-  getAll: () => {
-    return ['minecraft:overworld'];
-  },
-};
-
-export const dimension = {
-  runCommand: jest.fn((command: string) => {
-    if (!command.startsWith('scriptevent ')) {
-      return {
-        successCount: 0,
-      };
+  sendScriptEvent: jest.fn((event: string, message: string) => {
+    if (message.length > 2048) {
+      throw new Error('Message longer than 2048 sent in tests: ' + message);
     }
-
-    command = command.substring('scriptevent '.length);
-    const [id, ...pieces] = command.split(' ');
-
     for (const handler of Object.values(scriptEventReceive)) {
+      // console.log('sending to handler');
       (handler as any)({
-        id: id,
-        message: pieces.join(' '),
+        id: event,
+        message: message,
       });
     }
-
-    return {
-      successCount: 1,
-    };
   }),
-};
-
-export const world = {
-  getDynamicProperty,
-  setDynamicProperty,
-  getDimension: () => {
-    return dimension;
-  },
 };

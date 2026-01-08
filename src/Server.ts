@@ -94,7 +94,7 @@ const start = (server: Server) => {
 };
 
 export const stopServer = (server: Server) => {
-  sendEvent(serverStopEvent(server));
+  sendEvent(serverStopEvent(server), '');
 };
 
 export const startServer = (_server: Server) => {

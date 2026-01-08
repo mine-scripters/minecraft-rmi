@@ -1,4 +1,4 @@
-import { DimensionTypes, world } from '@minecraft/server';
+import { system } from '@minecraft/server';
 
 interface Message {
   id: string;
@@ -20,8 +20,6 @@ export const buildServerNamespace = (namespace: string) => `${MINESCRIPTERS_NAME
 
 export const inputMessageEvent = (namespace: string) => `${buildServerNamespace(namespace)}:rmi.event-payload`;
 
-export const sendEvent = (event: string) => {
-  DimensionTypes.getAll().some((dt) => {
-    return world.getDimension(dt.typeId)?.runCommand(`scriptevent ${event}`).successCount;
-  });
+export const sendEvent = (event: string, message: string) => {
+  system.sendScriptEvent(event, message);
 };

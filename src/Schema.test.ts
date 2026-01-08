@@ -279,6 +279,28 @@ describe('Schema', () => {
     ).not.toThrow();
   });
 
+  it('one or other', () => {
+    const schema: SchemaEntry = [
+      SchemaEntryType.STRING,
+      SchemaEntryType.BOOL, // string | boolean
+    ];
+
+    expect(() => validate(schema, 'hello world')).not.toThrow();
+    expect(() => validate(schema, 'other string')).not.toThrow();
+    expect(() => validate(schema, true)).not.toThrow();
+    expect(() => validate(schema, false)).not.toThrow();
+
+    const aggregateError = new AggregateError(
+      ['Invalid schema, not a string', 'Invalid schema, not a bool'],
+      'Invalid schema, none of the schemas matched'
+    );
+
+    expect(() => validate(schema, 1)).toThrow(aggregateError);
+    expect(() => validate(schema, 1.5)).toThrow(aggregateError);
+    expect(() => validate(schema, undefined)).toThrow(aggregateError);
+    expect(() => validate(schema, null)).toThrow();
+  });
+
   it('complex objects', () => {
     const schema: SchemaEntry = {
       type: SchemaEntryType.OBJECT,
