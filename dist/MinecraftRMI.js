@@ -1,12 +1,10 @@
-import { DimensionTypes, world, system } from '@minecraft/server';
+import { system } from '@minecraft/server';
 
 const MINESCRIPTERS_NAMESPACE = 'minescripters';
 const buildServerNamespace = (namespace) => `${MINESCRIPTERS_NAMESPACE}_${namespace}`;
 const inputMessageEvent = (namespace) => `${buildServerNamespace(namespace)}:rmi.event-payload`;
-const sendEvent = (event) => {
-    DimensionTypes.getAll().some((dt) => {
-        return world.getDimension(dt.typeId)?.runCommand(`scriptevent ${event}`).successCount;
-    });
+const sendEvent = (event, message) => {
+    system.sendScriptEvent(event, message);
 };
 
 var SchemaEntryType;
@@ -34,6 +32,7 @@ const validate = (schema, obj) => {
     schema = normalize(schema);
     if (Array.isArray(schema)) {
         let passed = false;
+        const errors = [];
         for (const subSchema of schema) {
             try {
                 validate(subSchema, obj);
@@ -41,11 +40,11 @@ const validate = (schema, obj) => {
                 break;
             }
             catch (e) {
-                console.error(e);
+                errors.push(e);
             }
         }
         if (!passed) {
-            throw new Error('Invalid schema');
+            throw new AggregateError(errors, 'Invalid schema, none of the schemas matched');
         }
         return;
     }
@@ -147,8 +146,6 @@ const makeId = () => {
 };
 
 const RMI_NAMESPACE = 'minescripters_rmi';
-// Prevents the scriptevent parser from identifying it as a json object an failing to parse
-const CHUNK_PADDING = '-';
 const receiverScriptEvent = (id) => `${RMI_NAMESPACE}:${id}.receiver`;
 const senderScriptEvent = (id) => `${RMI_NAMESPACE}:${id}.sender`;
 const promiseResolver = () => {
@@ -178,7 +175,7 @@ const internalSendMessage = async (header, data, scriptevent, maxMessageSize = 2
     const chunks = [];
     if (data !== undefined) {
         const dataString = JSON.stringify(data);
-        for (let i = 0; i < maxMessageSize; i += maxMessageSize) {
+        for (let i = 0; i < dataString.length; i += maxMessageSize) {
             chunks.push(dataString.slice(i, i + maxMessageSize));
         }
     }
@@ -195,12 +192,12 @@ const internalSendMessage = async (header, data, scriptevent, maxMessageSize = 2
         console.error('Transport header is bigger than 2048 characters:', rawTransportHeader);
         throw new Error('Transport header is bigger than 2048');
     }
-    sendEvent(`${scriptevent} ${rawTransportHeader}`);
+    sendEvent(scriptevent, rawTransportHeader);
     await initialAck;
     if (chunks.length > 0) {
         const chunksAck = ackWaiter(senderScriptEvent(id));
         for (const chunk of chunks) {
-            sendEvent(`${receiverScriptEvent(id)} ${CHUNK_PADDING}${chunk}`);
+            sendEvent(receiverScriptEvent(id), chunk);
         }
         await chunksAck;
     }
@@ -219,8 +216,7 @@ const internalMessageReceived = async (rawHeader) => {
         const [acked, ack] = promiseResolver();
         const listener = system.afterEvents.scriptEventReceive.subscribe((event) => {
             if (event.id === receiverScriptEvent(id)) {
-                // Removes CHUNK_PADDING
-                chunks.push(event.message.slice(1));
+                chunks.push(event.message);
                 if (chunks.length === chunkCount) {
                     ack();
                 }
@@ -228,12 +224,12 @@ const internalMessageReceived = async (rawHeader) => {
         }, {
             namespaces: [RMI_NAMESPACE],
         });
-        sendEvent(`${senderScriptEvent(id)}`);
+        sendEvent(`${senderScriptEvent(id)}`, '');
         await acked;
         system.afterEvents.scriptEventReceive.unsubscribe(listener);
         const rawData = chunks.join('');
         data = JSON.parse(rawData);
-        sendEvent(`${senderScriptEvent(id)}`);
+        sendEvent(`${senderScriptEvent(id)}`, '');
     }
     return {
         header: header.header,
